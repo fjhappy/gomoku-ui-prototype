@@ -175,8 +175,10 @@ body{
   position:relative;max-width:250px;background:#fff;border-radius:16px;
   padding:10px 13px;font-size:13.5px;line-height:1.55;color:var(--ink);
   box-shadow:0 3px 12px rgba(140,90,90,.10);
-  animation:bubbleIn .28s cubic-bezier(.2,.9,.3,1.2) both;
 }
+/* 入场动画只给「这一帧新出现的消息」。跟棋子同理：无条件挂在 .bubble 上，
+   每次重渲染整条消息流都会重播一遍 —— 落子时看着就是消息区在闪。 */
+.bubble.enter{animation:bubbleIn .28s cubic-bezier(.2,.9,.3,1.2) both}
 /* 截断必须放在内层：-webkit-line-clamp 与 padding 同层时，多余行会漏出来 */
 .bubble-text{
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
@@ -1156,11 +1158,11 @@ function avatarHTML(who, cls) {
   const img = p.avatar ? `<img src="${esc(p.avatar)}" alt="" onerror="this.remove()">` : '';
   return `<div class="avatar ${cls}">${initial}${img}</div>`;
 }
-function bubbleRow(text, who = 'character') {
+function bubbleRow(text, who = 'character', animate = false) {
   const me = who === 'viewer';
   return `<div class="bubble-row ${me ? 'me' : ''}">
     ${me ? avatarHTML('viewer', 'viewer') : avatarHTML('character', '')}
-    <div class="bubble"><span class="bubble-text">${text || ''}</span></div>
+    <div class="bubble${animate ? ' enter' : ''}"><span class="bubble-text">${text || ''}</span></div>
   </div>`;
 }
 function vsStrip() {
@@ -1200,18 +1202,23 @@ function setUtterance(trigger, text) {
   pushMessage('character', currentLine());
 }
 /* 消息区：最新的在最后，只留最近几条，旧的从上方溢出 */
+/* 每条消息带一个自增 id —— 认「哪些是本帧新来的」不能靠下标：
+   超过 8 条会 shift 掉最旧的，下标就不动了，新消息会被误判成旧的。 */
+let _feedSeq = 0, _lastFeedId = 0;
 function pushMessage(who, text) {
-  MODEL.feed.push({ who, text });
+  MODEL.feed.push({ id: ++_feedSeq, who, text });
   if (MODEL.feed.length > 8) MODEL.feed.shift();
 }
 function feedHTML() {
   const thinking = MODEL.view.phase === 'thinking';
+  const lastId = _lastFeedId;
+  _lastFeedId = MODEL.feed.length ? MODEL.feed[MODEL.feed.length - 1].id : 0;
   return MODEL.feed.map((m, i) => {
     const last = i === MODEL.feed.length - 1;
     const text = (thinking && last && m.who === 'character')
       ? m.text + '<span class="dots"><i></i><i></i><i></i></span>'
       : m.text;
-    return bubbleRow(text, m.who);
+    return bubbleRow(text, m.who, m.id > lastId);
   }).join('');
 }
 
