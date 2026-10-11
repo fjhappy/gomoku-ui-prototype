@@ -302,8 +302,11 @@ body{
   position:absolute;transform:translate(-50%,-50%);
   width:calc(var(--cell) - 2px);height:calc(var(--cell) - 2px);
   border-radius:50%;z-index:4;pointer-events:none;
-  animation:drop .18s ease-out both;
 }
+/* 入场动画只给「这一帧新落下的棋子」。
+   无条件写在 .stone 上的话，每次重渲染整盘棋子都会重播 ——
+   点一下空交点（只是预览）就整盘闪一次。该不该加 .drop 由 JS 判断。 */
+.board .stone.drop{animation:drop .18s ease-out both}
 @keyframes drop{from{transform:translate(-50%,-50%) scale(.55);opacity:.4}to{transform:translate(-50%,-50%) scale(1);opacity:1}}
 .board .stone.black{
   background:radial-gradient(circle at 34% 30%, #7d7d7d 0%, #2b2b2b 45%, #0d0d0d 100%);
@@ -524,11 +527,12 @@ body{
 .row-btns button.apply{background:var(--pink);border-color:var(--pink);color:#fff}
 .err{color:#D4436A;font-size:11.5px;margin-top:6px;min-height:14px;font-family:ui-monospace,Consolas,monospace}
 
-/* 展开 / 收起调试面板的开关 —— 固定视口右下，低调不抢戏 */
+/* 展开 / 收起调试面板的开关 —— 固定视口右上，低调不抢戏 */
 .dev-toggle{
-  position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  position:fixed;right:16px;top:calc(16px + env(safe-area-inset-top,0px));
   z-index:45;width:44px;height:44px;border:0;border-radius:50%;
-  background:rgba(255,255,255,.94);color:#8A6F68;font-size:19px;cursor:pointer;
+  background:rgba(255,255,255,.94);color:#8A6F68;
+  font-size:11px;font-weight:800;letter-spacing:.4px;cursor:pointer;
   box-shadow:0 6px 18px rgba(120,80,80,.22);
   display:flex;align-items:center;justify-content:center;
   transition:transform .12s ease, background .12s ease, color .12s ease;
@@ -623,7 +627,7 @@ body{
 </aside>
 
 <!-- 调试面板开关：默认收起，点它才展开 -->
-<button class="dev-toggle" id="btn-dev" type="button" aria-label="调试面板" title="调试面板">⚙</button>
+<button class="dev-toggle" id="btn-dev" type="button" aria-label="调试面板" title="调试面板">DEV</button>
 
 <script>
 /* ==========================================================================
@@ -1087,6 +1091,9 @@ const STARS = [[3,3],[3,7],[3,11],[7,3],[7,7],[7,11],[11,3],[11,7],[11,11]];
 /* 交点 i 的圆心：i * cell + 半格（与网格线位置一致） */
 const AT = i => `calc(var(--cell) * ${i} + var(--cell) / 2)`;
 const CENTER = AT;
+/* 上一次渲染时盘上有多少颗子。用来认出「这一帧新落下的是哪几颗」——
+   每次 render 都是整块 innerHTML 重建，不这么做的话动画会全盘重播。 */
+let _lastStoneCount = -1;
 
 function boardHTML(locked) {
   const g = G();
@@ -1099,6 +1106,13 @@ function boardHTML(locked) {
     h += `<div class="star" style="left:${CENTER(c)};top:${CENTER(r)}"></div>`;
 
   const last = g.moves[g.moves.length - 1];
+  // 这一帧新落下的坐标（预览落子不改 moves，所以不会误判成「新落子」）
+  const fresh = new Set();
+  for (let i = Math.max(0, _lastStoneCount); i < g.moves.length; i++) {
+    const m = g.moves[i];
+    fresh.add(m.row * 15 + m.col);
+  }
+  _lastStoneCount = g.moves.length;
   if (!locked) {
     for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) {
       if (g.board[r] && g.board[r][c]) continue;
@@ -1110,7 +1124,8 @@ function boardHTML(locked) {
     const v = g.board[r] && g.board[r][c];
     if (!v) continue;
     const isLast = last && last.row === r && last.col === c;
-    h += `<div class="stone ${v}${isLast ? ' last' : ''}" style="left:${CENTER(c)};top:${CENTER(r)}"></div>`;
+    const drop = fresh.has(r * 15 + c) ? ' drop' : '';
+    h += `<div class="stone ${v}${isLast ? ' last' : ''}${drop}" style="left:${CENTER(c)};top:${CENTER(r)}"></div>`;
   }
   const p = MODEL.view.pending;
   if (p && !locked)
