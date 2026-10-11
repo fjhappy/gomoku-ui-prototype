@@ -476,10 +476,14 @@ body{
 .sheet .hint{font-size:11.5px;color:var(--ink-3);padding:2px 24px 0;line-height:1.6}
 
 /* ============================ 开发工具条 ============================ */
+/* 默认收起。它是给开发者的调试面板，不该跟游戏界面抢位置 ——
+   尤其手机上，默认只留手机预览，点右下角那颗齿轮才展开。 */
 .devbar{
+  display:none;
   width:360px;flex:0 0 auto;background:#fff;border-radius:18px;
   padding:18px;box-shadow:0 14px 34px rgba(120,80,80,.14);font-size:13px;
 }
+.devbar.on{display:block}
 .devbar h2{margin:0 0 4px;font-size:15px;font-weight:800}
 .devbar .sub{color:var(--ink-2);font-size:12px;line-height:1.6;margin-bottom:14px}
 .devbar .grp{margin-bottom:16px}
@@ -519,6 +523,18 @@ body{
 }
 .row-btns button.apply{background:var(--pink);border-color:var(--pink);color:#fff}
 .err{color:#D4436A;font-size:11.5px;margin-top:6px;min-height:14px;font-family:ui-monospace,Consolas,monospace}
+
+/* 展开 / 收起调试面板的开关 —— 固定视口右下，低调不抢戏 */
+.dev-toggle{
+  position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  z-index:45;width:44px;height:44px;border:0;border-radius:50%;
+  background:rgba(255,255,255,.94);color:#8A6F68;font-size:19px;cursor:pointer;
+  box-shadow:0 6px 18px rgba(120,80,80,.22);
+  display:flex;align-items:center;justify-content:center;
+  transition:transform .12s ease, background .12s ease, color .12s ease;
+}
+.dev-toggle:active{transform:scale(.94)}
+.dev-toggle.on{background:var(--pink);color:#fff}
 
 @media (max-width:1180px){ body{flex-direction:column;align-items:center} .devbar{width:390px} }
 </style>
@@ -606,6 +622,9 @@ body{
   </div>
 </aside>
 
+<!-- 调试面板开关：默认收起，点它才展开 -->
+<button class="dev-toggle" id="btn-dev" type="button" aria-label="调试面板" title="调试面板">⚙</button>
+
 <script>
 /* ==========================================================================
    工具（必须在 MODEL 之前声明：MODEL 的初始化会用到 clone）
@@ -654,20 +673,66 @@ const DEFAULT_MODEL = {
     moves: [],                    // { color, row, col, coordinate }
   },
   // 角色发言：来自消息流 / 角色运行时
+  // 每个槽位给几句变体，运行时随机取一句（见 pickLine）——
+  // 同一个局面永远同一句话，再漂亮也像机器人。
   dialogue: {
-    opening:  '来下一局五子棋吧~<br>这次我可不会让你轻易赢哦。<span class="heart">♡</span>',
-    thinking: '让我想想…… 这个位置有点意思。',
-    move:     '我落子在这里，你打算怎么走？',
-    critic:   '这个局面有点危险呢…',
-    ponder:   '再想想，这一步很重要…',
-    resign:   '我认输了，你下得真好。',
-    undo:     '咦，要悔棋呀？那我等你重新落子。',
-    lose:     '这局我输了呢… 不过和你下棋真的很开心，再来一局吧？',
+    opening: [
+      '来下一局五子棋吧~<br>这次我可不会让你轻易赢哦。<span class="heart">♡</span>',
+      '手痒了，来一盘？先说好，我可不会放水。',
+      '棋盘摆好了。黑棋是你的，先手让给你。',
+    ],
+    thinking: [
+      '让我想想…… 这个位置有点意思。',
+      '唔……别催，我在算。',
+      '这一步得想清楚，你刚才那手有点凶。',
+    ],
+    move: [
+      '我落子在这里，你打算怎么走？',
+      '这手怎么样？我自己挺满意的。',
+      '喏，该你了。',
+    ],
+    critic: [
+      '这个局面有点危险呢…',
+      '嘶，你这手藏得挺深。',
+      '到这一步，我得认真了。',
+    ],
+    ponder: [
+      '再想想，这一步很重要…',
+      '给我点时间，我不想下错。',
+      '别急，容我多看两眼。',
+    ],
+    resign: [
+      '我认输了，你下得真好。',
+      '这局是我不行，认了。',
+      '唉，被你看穿了。认输认输。',
+    ],
+    undo: [
+      '咦，要悔棋呀？那我等你重新落子。',
+      '悔棋？行吧，就当刚才那手不存在。',
+      '好好好，让你悔。这次想清楚再下哦。',
+    ],
     // 用户在局内说话之后，角色对这句话的回应
-    reply:    '嗯，我听着呢~ 不过你这步棋可要想清楚哦。',
-    // 终局：按结果分三种，不再是固定一句
-    win:      '这局我赢啦~ 不过你也越来越难对付了呢。',
-    draw:     '居然下成和棋了，我们是不是太了解对方了。',
+    reply: [
+      '嗯，我听着呢~ 不过你这步棋可要想清楚哦。',
+      '你说话我就得停一下…… 好啦，你说。',
+      '嗯？在听在听，不过你也别忘了棋盘。',
+    ],
+    // 终局：按结果分三种，每种也不是固定一句
+    lose: [
+      '这局我输了呢… 不过和你下棋真的很开心，再来一局吧？',
+      '输了输了。不过下次我可要讨回来。',
+      '被你赢了。这局你确实下得好，我服。',
+    ],
+    win: [
+      '这局我赢啦~ 不过你也越来越难对付了呢。',
+      '赢啦！说实话，你刚才那手挺吓人的。',
+      '这局是我的。要不要再来一盘，给你个报仇的机会？',
+    ],
+    draw: [
+      '居然下成和棋了，我们是不是太了解对方了。',
+      '和棋？这倒是少见，看来我们棋力差不多。',
+      '平了。再来一盘分个高下？',
+    ],
   },
   // 角色「这一轮说的话」。生产环境由服务端生成后下发，客户端只负责渲染；
   // 服务端没给（离线 / 失败）时才回退到 dialogue 里同 trigger 的兜底文案。
@@ -685,7 +750,7 @@ const DEFAULT_MODEL = {
     resign: '认输', newGame: '开始新局', playAgain: '再来一局', backToChat: '返回聊天',
     viewerWon: '{viewer} 获胜！', characterWon: '{character} 获胜',
     viewerWonIcon: '🏆', characterWonIcon: '🌸', drawIcon: '🤝',
-    speakPlaceholder: '说点什么…', send: '发送',
+    speakPlaceholder: '和{character}说句话…', send: '发送',
   },
   // 视图状态（不属于业务数据）
   view: { phase: 'launch', pending: null, submitting: false, showCoords: true,
@@ -735,9 +800,21 @@ const GomokuAdapter = {
 /* 模拟「服务端生成」的终局台词。刻意和 dialogue 里的兜底文案不同，
    方便一眼看出当前走的是哪条路径。 */
 const GENERATED_END = {
-  lose: '哎呀，被你抓住了…这局算你的。不过下次我可不会手下留情哦。',
-  win:  '这局我赢啦~ 不过你真的越来越难对付了呢。',
-  draw: '居然下成和棋了，我们是不是太了解对方了。',
+  lose: [
+    '哎呀，被你抓住了…这局算你的。不过下次我可不会手下留情哦。',
+    '这局你确实下得好，我没什么好说的。再来一盘？',
+    '被你赢了…行吧，这次是我大意了。',
+  ],
+  win: [
+    '这局我赢啦~ 不过你真的越来越难对付了呢。',
+    '赢啦！说实话，你刚才那手挺吓人的。',
+    '这局是我的。要不要再来一盘，给你个报仇的机会？',
+  ],
+  draw: [
+    '居然下成和棋了，我们是不是太了解对方了。',
+    '和棋？这倒是少见，看来我们棋力差不多。',
+    '平了。再来一盘分个高下？',
+  ],
 };
 
 const Mock = (() => {
@@ -982,14 +1059,14 @@ const Mock = (() => {
       g.board[r][c] = 'black'; g.moves.push({color:'black', row:r, col:c, coordinate:coord}); g.stateVersion++;
       if (wins(g.board, r, c, 'black')) {
         g.status = 'black_won'; g.currentPlayer = null;
-        setUtterance('lose', GENERATED_END.lose);
+        setUtterance('lose', pickLine(GENERATED_END.lose));
         return clone(g);
       }
       const [wr, wc] = pick(g.board);
       g.board[wr][wc] = 'white'; g.moves.push({color:'white', row:wr, col:wc, coordinate:coordOf(wr,wc)}); g.stateVersion++;
       if (wins(g.board, wr, wc, 'white')) {
         g.status = 'white_won'; g.currentPlayer = null;
-        setUtterance('win', GENERATED_END.win);
+        setUtterance('win', pickLine(GENERATED_END.win));
         return clone(g);
       }
       g.currentPlayer = 'BLACK';
@@ -999,7 +1076,7 @@ const Mock = (() => {
     reset() { g = fresh(); return clone(g); },
 
     // 局内说话的回应。真实实现应由角色侧生成，这里只回固定台词。
-    say() { return MODEL.dialogue.reply; },
+    say() { return pickLine(MODEL.dialogue.reply); },
   };
 })();
 
@@ -1096,7 +1173,12 @@ function statusText() {
 /* 角色这一轮说的话：服务端给的优先，没有才回退到本地兜底表 */
 function currentLine() {
   const u = MODEL.utterance || {};
-  return u.text || MODEL.dialogue[u.trigger] || MODEL.dialogue.opening;
+  return u.text || pickLine(MODEL.dialogue[u.trigger]) || pickLine(MODEL.dialogue.opening);
+}
+/** 台词槽位是多句的，随机取一句 —— 同一个局面每次不一样，才像有人在陪你下。 */
+function pickLine(v) {
+  if (Array.isArray(v)) return v[Math.floor(Math.random() * v.length)];
+  return v;
 }
 function setUtterance(trigger, text) {
   MODEL.utterance = { trigger, text: text || '' };
@@ -1189,7 +1271,7 @@ function speakBar() {
   const d = MODEL.view.draft || '';
   return `<div class="speak-bar">
     <input class="speak-input" id="speak-input" type="text" autocomplete="off"
-           placeholder="${esc(U().speakPlaceholder)}" value="${esc(d)}">
+           placeholder="${esc(tpl(U().speakPlaceholder))}" value="${esc(d)}">
     <button class="speak-send" id="btn-send" ${d.trim() ? '' : 'disabled'}>${esc(U().send)}</button>
   </div>`;
 }
@@ -1260,11 +1342,17 @@ function renderLines() {
 
   <div class="lines-card" style="margin-top:14px">
     <h3>兜底文案表（服务端没给时才用）</h3>
-    ${slots.map(([k, key, when]) => `<div class="ln">
-      <span class="k">${k}</span>
-      <span>${d[key] || '<i style="color:#B49C95">（未提供）</i>'}
-        <span class="src">dialogue.${key} · ${when}</span></span>
-    </div>`).join('')}
+    ${slots.map(([k, key, when]) => {
+      const list = Array.isArray(d[key]) ? d[key] : (d[key] ? [d[key]] : []);
+      const body = list.length
+        ? list.map(t => `<div>· ${t}</div>`).join('')
+        : '<i style="color:#B49C95">（未提供）</i>';
+      return `<div class="ln">
+        <span class="k">${k}</span>
+        <span>${body}
+          <span class="src">dialogue.${key} · ${when} · ${list.length} 条随机</span></span>
+      </div>`;
+    }).join('')}
   </div>
 
   <div class="note" style="margin-top:14px">
@@ -1583,7 +1671,7 @@ document.querySelectorAll('#state-btns button').forEach(b => b.addEventListener(
     midGame();
     setUtterance(ph === 'thinking' ? 'thinking' : 'move');
   }
-  if (ph === 'end') { midGame(); MODEL.game.status = 'black_won'; setUtterance('lose', GENERATED_END.lose); }
+  if (ph === 'end') { midGame(); MODEL.game.status = 'black_won'; setUtterance('lose', pickLine(GENERATED_END.lose)); }
   MODEL.view.phase = ph;
   render();
 }));
@@ -1612,6 +1700,17 @@ $('#menu-newgame').addEventListener('click', async () => {
 });
 
 $('#tg-coord').addEventListener('change', e => { MODEL.view.showCoords = e.target.checked; render(); });
+
+/* 调试面板默认收起，点右下角齿轮展开 / 收起。
+   窄屏下面板在手机预览下方，展开时顺手滚过去，省得用户找不到。 */
+$('#btn-dev').addEventListener('click', () => {
+  const bar = document.querySelector('.devbar');
+  const on = bar.classList.toggle('on');
+  $('#btn-dev').classList.toggle('on', on);
+  if (on && window.matchMedia('(max-width: 1180px)').matches) {
+    bar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+});
 
 /* ---- MODEL 编辑器 ---- */
 const ta = $('#model-json'), errBox = $('#model-err');
