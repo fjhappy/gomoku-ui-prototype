@@ -1,0 +1,1426 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Echo 五子棋 · 苏苏版 UI 原型 v2</title>
+<!--
+  ============================================================================
+  Echo 五子棋 · 苏苏版 UI 原型 v2   (design-prototypes/echo-gomoku-susu-v2.html)
+  ----------------------------------------------------------------------------
+  本稿只做两件事：
+    (1) 按设计稿图片还原布局与视觉；
+    (2) 把所有「运行时数据」抽成 MODEL，页面不写死任何身份/头像/发言。
+
+  数据来源对照：
+    MODEL.session.viewer      ← 登录用户（昵称、头像）
+    MODEL.session.character   ← 当前角色（昵称、头像）
+    MODEL.utterance.text      ← 角色这一轮说的话（服务端生成）
+    MODEL.dialogue.*          ← 兜底文案表（服务端未下发时使用）
+    MODEL.game.*              ← read_experience_state 返回的对局快照
+    MODEL.ui.*                ← 纯 UI 文案（按钮、状态词），可以硬编码
+
+  右侧工具条可实时编辑 MODEL，改完立刻重渲染 —— 用来验证「没有写死」。
+  ============================================================================
+-->
+<style>
+:root{
+  /* 采样自设计稿 */
+  --pink:        #F94E80;
+  --pink-dark:   #E23A6D;
+  --pink-soft:   #FADBD6;
+  --pink-tint:   #F8DBD3;
+  --page:        #F4E9E3;
+  --card:        #F9E8E1;
+  --chip:        #F8E9E2;
+  --wood:        #EFB880;
+  --wood-deep:   #E5A96E;
+  --line:        #C08F5C;
+  --ink:         #3A2B26;
+  --ink-2:       #8A6F68;
+  --ink-3:       #82706A;
+  --disabled:    #E6DDDE;
+  --disabled-ink:#695C58;
+
+  --cell: 20px;
+  --half: calc(var(--cell) / 2);   /* 交点距棋盘边缘的距离 = 半格 */
+  --coord: 16px;
+  --radius-phone: 46px;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:#E7E2DE;
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  color:var(--ink);
+  display:flex;gap:28px;align-items:flex-start;justify-content:center;
+  padding:32px 24px 64px;min-height:100vh;
+}
+
+/* ============================ 手机外壳 ============================ */
+.phone{
+  position:relative;width:390px;height:844px;flex:0 0 auto;
+  background:#1b1b1b;border-radius:var(--radius-phone);padding:10px;
+  box-shadow:0 30px 60px rgba(60,30,20,.28), 0 0 0 2px #2c2c2c inset;
+}
+.screen{
+  position:relative;width:100%;height:100%;border-radius:36px;
+  overflow:hidden;background:var(--page);display:flex;flex-direction:column;
+}
+.notch{
+  position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  width:112px;height:26px;background:#1b1b1b;border-radius:0 0 16px 16px;z-index:40;
+}
+.statusbar{
+  height:44px;flex:0 0 44px;display:flex;align-items:center;justify-content:space-between;
+  padding:0 22px;font-size:13px;font-weight:600;color:var(--ink);
+  position:relative;z-index:30;
+}
+.statusbar .sb-right{letter-spacing:1px;font-size:11px}
+
+/* ============================ 顶栏 ============================ */
+.appbar{
+  height:52px;flex:0 0 52px;display:flex;align-items:center;gap:6px;
+  padding:0 10px;position:relative;z-index:20;
+}
+.appbar h1{
+  flex:1;margin:0;text-align:center;
+  font-size:17px;font-weight:600;letter-spacing:.3px;color:var(--ink);
+}
+.icon-btn{
+  width:44px;height:44px;border:0;background:transparent;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;color:var(--ink);cursor:pointer;border-radius:50%;
+}
+.icon-btn:active{background:rgba(0,0,0,.05)}
+.icon-btn .gear{font-size:17px;opacity:.75}
+
+/* ============================ 滚动区 ============================ */
+.content{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:0 14px 26px;scrollbar-width:none}
+.content::-webkit-scrollbar{display:none}
+
+/* 操作区：固定底部 Dock，不在滚动内容里。
+   棋盘是核心交互，「确认落子」必须随时可点，不能被内容流挤走。 */
+.dock{
+  flex:0 0 auto;background:var(--page);
+  padding:0 14px 14px;
+  padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));
+}
+.dock:not(.on){display:none}
+/* dock 里三种内容（落子操作 / 输入条 / 思考状态条）必须等高，
+   否则内容区高度会变 ⇒ 消息区高度变 ⇒ 棋盘跟着动 */
+.dock > *{height:62px;box-sizing:border-box}
+
+/* ============================ 立绘区 ============================ */
+/* 角色 Presence 区。高度由 Experience 声明（见 MODEL.presence.size），不做一刀切模板 */
+.hero{
+  position:relative;margin:-6px -14px 0;overflow:hidden;
+  background:radial-gradient(120% 80% at 50% 18%, #FFE6E0 0%, #F9CFC9 45%, #F3B9C4 100%);
+}
+.hero .hero-art{
+  position:absolute;left:50%;bottom:-18px;transform:translateX(-50%);
+  width:330px;opacity:.96;filter:drop-shadow(0 12px 26px rgba(150,80,90,.22));
+}
+.hero .hero-fallback{
+  position:absolute;left:50%;bottom:40px;transform:translateX(-50%);
+  width:190px;height:190px;border-radius:50%;
+  background:linear-gradient(160deg,#FFF0EC,#F6C9CE);
+  display:flex;align-items:center;justify-content:center;
+  font-size:70px;font-weight:700;color:#E08AA0;
+}
+.hero::after{
+  content:"";position:absolute;inset:auto 0 0 0;height:110px;
+  background:linear-gradient(to top,var(--page) 8%,rgba(244,233,227,.72) 45%,transparent);
+}
+
+/* ============================ 气泡 ============================ */
+/* 消息区在棋盘上方、吃掉剩余空间：最新的贴底，旧的从上方溢出并淡出。
+   高度是弹性的，但 human / thinking / character 三态的 dock 高度一致
+   ⇒ 内容区高度恒定 ⇒ 棋盘顶边仍然不动。 */
+.feed{display:none}
+.screen.feed-on .feed{
+  display:flex;flex-direction:column;justify-content:flex-end;gap:8px;
+  /* 关键：flex-basis 必须是 0（不能用 auto）。
+     用 auto 时基准尺寸会取「内容高度」⇒ 消息越多基准越高，把下面内容挤扁。 */
+  flex:1 1 0%;min-height:62px;overflow:hidden;
+  padding:2px 14px 10px;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 16px);
+          mask-image:linear-gradient(to bottom,transparent 0,#000 16px);
+}
+.screen.feed-on .content{flex:0 1 auto;min-height:0}
+.bubble-row{display:flex;gap:9px;align-items:flex-start}
+.bubble-row.me{flex-direction:row-reverse}
+.avatar{
+  width:36px;height:36px;flex:0 0 36px;border-radius:50%;
+  background:linear-gradient(150deg,#FFF3F0,#F3C4CB);
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;color:#D2708C;overflow:hidden;
+  box-shadow:0 2px 6px rgba(120,60,70,.16);
+}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.avatar.viewer{background:linear-gradient(150deg,#5b4a44,#2b2220);color:#fff}
+.bubble{
+  position:relative;max-width:250px;background:#fff;border-radius:16px;
+  padding:10px 13px;font-size:13.5px;line-height:1.55;color:var(--ink);
+  box-shadow:0 3px 12px rgba(140,90,90,.10);
+  animation:bubbleIn .28s cubic-bezier(.2,.9,.3,1.2) both;
+}
+/* 截断必须放在内层：-webkit-line-clamp 与 padding 同层时，多余行会漏出来 */
+.bubble-text{
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+  overflow:hidden;overflow-wrap:anywhere;
+}
+.bubble .heart{color:var(--pink)}
+.bubble-row.me .bubble{background:var(--pink);color:#fff}
+.bubble-row.me .bubble .heart{color:#fff}
+@keyframes bubbleIn{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:none}}
+
+/* ============================ VS 条 / VS 块 ============================ */
+.vs-strip{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--pink-tint);border-radius:14px;padding:9px 14px;margin:12px 0;
+}
+.vs-strip .side{display:flex;align-items:center;gap:8px}
+.vs-strip .side.right{flex-direction:row-reverse}
+.vs-strip .stone-dot{
+  width:26px;height:26px;border-radius:50%;
+  box-shadow:inset -3px -4px 6px rgba(0,0,0,.28), 0 2px 5px rgba(0,0,0,.22);
+}
+.vs-strip .stone-dot.black{background:linear-gradient(145deg,#6a6a6a,#141414)}
+.vs-strip .stone-dot.white{background:linear-gradient(145deg,#ffffff,#dcdcdc)}
+.vs-strip .who{font-size:13.5px;font-weight:600;line-height:1.25;max-width:96px}
+.vs-strip .who small{display:block;font-size:11px;font-weight:400;color:#695C58}
+.vs-strip .who .ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+.vs-strip .vs-word{font-size:19px;font-weight:800;font-style:italic;color:var(--pink);letter-spacing:.5px}
+.mini-avatar{
+  width:30px;height:30px;flex:0 0 30px;border-radius:50%;overflow:hidden;
+  background:linear-gradient(150deg,#FFF3F0,#F3C4CB);
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;color:#D2708C;
+}
+.mini-avatar img{width:100%;height:100%;object-fit:cover}
+
+.vs-block{display:flex;align-items:center;justify-content:center;gap:26px;margin:6px 0 20px}
+.vs-block .player{width:104px;text-align:center}
+.vs-block .big-avatar{
+  width:66px;height:66px;margin:0 auto;border-radius:50%;overflow:hidden;
+  background:linear-gradient(150deg,#FFF3F0,#F3C4CB);
+  display:flex;align-items:center;justify-content:center;
+  font-size:24px;font-weight:700;color:#D2708C;
+  box-shadow:0 6px 16px rgba(120,60,70,.20);border:2px solid #fff;
+}
+.vs-block .big-avatar.viewer{background:linear-gradient(150deg,#5b4a44,#2b2220);color:#fff}
+.vs-block .big-avatar img{width:100%;height:100%;object-fit:cover}
+.vs-block .player .nm{
+  margin-top:8px;font-size:14px;font-weight:700;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.vs-block .player .tag{
+  margin-top:5px;display:inline-block;background:rgba(255,255,255,.75);
+  border-radius:11px;padding:3px 10px;font-size:11.5px;color:var(--ink-2);
+}
+.vs-block .vs-big{font-size:26px;font-weight:900;font-style:italic;color:var(--pink);letter-spacing:1px}
+
+/* ============================ 特性列表 ============================ */
+.features{list-style:none;margin:0 0 20px;padding:0 6px;display:grid;gap:11px}
+.features li{display:flex;align-items:center;gap:9px;font-size:13px;color:#6E5A55}
+.features .fi{
+  width:20px;height:20px;flex:0 0 20px;border-radius:6px;background:var(--pink-soft);
+  display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--pink-dark);
+}
+
+/* ============================ 按钮 ============================ */
+.btn{
+  display:block;width:100%;border:0;border-radius:26px;padding:16px 10px;
+  font-size:16px;font-weight:700;letter-spacing:.5px;font-family:inherit;
+  cursor:pointer;transition:transform .12s ease, box-shadow .12s ease;
+}
+.btn:active{transform:scale(.985)}
+.btn-primary{
+  color:#fff;background:linear-gradient(180deg,#FB6A94 0%,var(--pink) 55%,#F03F73 100%);
+  box-shadow:0 10px 22px rgba(249,78,128,.34);
+}
+.btn-primary:disabled{background:var(--disabled);color:var(--disabled-ink);box-shadow:none;cursor:default;transform:none}
+.btn-ghost{background:#fff;color:#7A635E;box-shadow:0 2px 8px rgba(140,90,90,.10)}
+
+/* ============================ 棋盘 ============================ */
+.board-shell{
+  background:linear-gradient(170deg,#F3C48F,var(--wood) 40%,var(--wood-deep));
+  border-radius:18px;padding:10px;
+  box-shadow:0 12px 26px rgba(120,72,20,.26), 0 0 0 1px rgba(255,255,255,.28) inset;
+}
+.coord-row{
+  display:flex;align-items:center;height:15px;
+  font-size:9.5px;color:#654321;font-weight:600;letter-spacing:.4px;user-select:none;
+}
+.coord-row .lead{width:var(--coord);flex:0 0 var(--coord)}
+.coord-row .cells{flex:1;display:grid;grid-template-columns:repeat(15,1fr);text-align:center}
+.coord-row .tail{width:var(--coord);flex:0 0 var(--coord)}
+.board-mid{display:flex;align-items:stretch}
+.coord-col{
+  width:var(--coord);flex:0 0 var(--coord);
+  display:grid;grid-template-rows:repeat(15,1fr);
+  align-items:center;text-align:center;
+  font-size:9.5px;color:#654321;font-weight:600;user-select:none;
+}
+.board{
+  position:relative;flex:0 0 auto;
+  width:calc(var(--cell) * 15);
+  height:calc(var(--cell) * 15);
+  background:
+    repeating-linear-gradient(105deg, rgba(255,255,255,.040) 0 11px, rgba(160,100,45,.022) 11px 26px),
+    linear-gradient(160deg,#F6CD9B,#EFBB84 55%,#E9B076);
+  border-radius:3px;
+}
+.board .gl{position:absolute;background:var(--line);opacity:.85}
+.board .gl.h{height:1px;left:var(--half);right:var(--half)}
+.board .gl.v{width:1px;top:var(--half);bottom:var(--half)}
+.board .star{
+  position:absolute;width:5px;height:5px;border-radius:50%;
+  background:#7C5228;transform:translate(-50%,-50%);z-index:2;
+}
+.board .spot{
+  position:absolute;transform:translate(-50%,-50%);
+  width:var(--cell);height:var(--cell);border-radius:50%;z-index:3;cursor:pointer;
+}
+.board .spot:hover::after{
+  content:"";position:absolute;inset:22%;border-radius:50%;background:rgba(249,78,128,.20);
+}
+.board .stone{
+  position:absolute;transform:translate(-50%,-50%);
+  width:calc(var(--cell) - 2px);height:calc(var(--cell) - 2px);
+  border-radius:50%;z-index:4;pointer-events:none;
+  animation:drop .18s ease-out both;
+}
+@keyframes drop{from{transform:translate(-50%,-50%) scale(.55);opacity:.4}to{transform:translate(-50%,-50%) scale(1);opacity:1}}
+.board .stone.black{
+  background:radial-gradient(circle at 34% 30%, #7d7d7d 0%, #2b2b2b 45%, #0d0d0d 100%);
+  box-shadow:inset -2px -3px 5px rgba(0,0,0,.55), 0 3px 5px rgba(90,50,10,.42);
+}
+.board .stone.white{
+  background:radial-gradient(circle at 34% 30%, #ffffff 0%, #f4f1ee 48%, #cfc8c2 100%);
+  box-shadow:inset -2px -3px 5px rgba(120,100,80,.28), 0 3px 5px rgba(90,50,10,.38);
+}
+.board .stone.last::after{
+  content:"";position:absolute;inset:32%;border-radius:50%;
+  background:var(--pink);box-shadow:0 0 0 1.5px rgba(255,255,255,.85);
+}
+.board .stone.preview{
+  background:radial-gradient(circle at 34% 30%, rgba(255,255,255,.9), rgba(249,78,128,.42));
+  box-shadow:0 0 0 2px var(--pink) inset, 0 3px 6px rgba(200,60,100,.30);
+  animation:pulse 1.1s ease-in-out infinite;
+}
+@keyframes pulse{0%,100%{opacity:.72}50%{opacity:1}}
+.board.locked .spot{cursor:default}
+.board.locked .spot:hover::after{display:none}
+
+/* ============================ 信息行 / 操作区 ============================ */
+.info-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 2px;min-height:30px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;background:var(--chip);
+  border-radius:14px;padding:6px 12px;font-size:12.5px;color:#7A635E;font-weight:600;
+}
+.chip b{color:var(--pink-dark);font-weight:800;letter-spacing:.5px}
+.text-btn{
+  border:0;background:transparent;font-family:inherit;font-size:12.5px;font-weight:600;
+  color:var(--pink);cursor:pointer;padding:6px 4px;
+}
+.action-bar{display:flex;gap:12px;align-items:stretch}
+.action-bar .btn{flex:1;padding:15px 8px;font-size:15px}
+.action-bar .btn-primary{flex:1.32}
+.btn .sub{display:block;font-size:10.5px;font-weight:400;opacity:.75;margin-top:1px}
+
+/* 说话模式：占落子操作区同一个位置、同样高度 ⇒ 棋盘一格不动 */
+.speak-bar{display:flex;gap:10px;align-items:center;min-height:61px}
+.speak-input{
+  flex:1;min-width:0;height:48px;border:0;border-radius:24px;
+  padding:0 16px;font-family:inherit;font-size:14px;color:var(--ink);
+  background:#fff;box-shadow:0 2px 8px rgba(140,90,90,.12);
+}
+.speak-input::placeholder{color:var(--ink-3)}
+.speak-input:focus{outline:none;box-shadow:0 0 0 1.5px var(--pink),0 2px 8px rgba(140,90,90,.12)}
+.speak-send{
+  flex:0 0 auto;height:48px;border:0;border-radius:24px;padding:0 20px;
+  font-family:inherit;font-size:14px;font-weight:700;color:#fff;cursor:pointer;
+  background:linear-gradient(180deg,#FB6A94,var(--pink) 55%,#F03F73);
+  box-shadow:0 8px 18px rgba(249,78,128,.30);
+}
+.speak-send:disabled{background:var(--disabled);color:var(--disabled-ink);box-shadow:none;cursor:default}
+/* 气泡可点 = 进入说话 */
+.bubble.tappable{cursor:pointer}
+.bubble.tappable:active{transform:scale(.99)}
+.status-strip{
+  display:flex;align-items:center;justify-content:center;gap:9px;
+  min-height:62px;
+  background:var(--disabled);border-radius:22px;padding:15px 12px;
+  font-size:14px;color:#695C58;font-weight:600;
+}
+.status-strip .eta{font-size:11.5px;font-weight:400;opacity:.78}
+.spinner{
+  width:15px;height:15px;border-radius:50%;
+  border:2px solid rgba(160,140,135,.35);border-top-color:#B0A09B;
+  animation:spin .9s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* 思考中的三点：内联在气泡里，不额外占行 */
+.dots{display:inline-flex;gap:3px;margin-left:6px;vertical-align:middle}
+.dots i{width:4px;height:4px;border-radius:50%;background:var(--pink);animation:bounce 1.1s infinite}
+.dots i:nth-child(2){animation-delay:.15s}
+.dots i:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-3px);opacity:1}}
+
+/* ============================ 终局 ============================ */
+/* 整屏铺满：立绘吃掉上方所有剩余空间，按钮贴底，不留大片空白 */
+.end-screen{display:flex;flex-direction:column;min-height:100%}
+.end-hero{
+  position:relative;flex:1 1 auto;min-height:268px;overflow:hidden;
+  margin:-6px -14px 0;
+  background:radial-gradient(120% 80% at 50% 22%, #FFE8E2 0%, #F7CBCB 55%, #F0B6C2 100%);
+}
+.end-hero .end-art{
+  position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+  width:118%;opacity:.97;
+  filter:drop-shadow(0 10px 24px rgba(150,80,90,.20));
+}
+.end-hero .end-art-fallback{
+  position:absolute;left:50%;bottom:34px;transform:translateX(-50%);
+  width:168px;height:168px;border-radius:50%;
+  background:linear-gradient(160deg,#FFF0EC,#F6C9CE);
+  display:flex;align-items:center;justify-content:center;
+  font-size:62px;font-weight:700;color:#E08AA0;
+}
+.end-hero::after{
+  content:"";position:absolute;inset:auto 0 0 0;height:64px;pointer-events:none;
+  background:linear-gradient(to top,rgba(244,233,227,.92),transparent);
+}
+/* 终局台词浮在立绘上，锚在右下角、向上生长。
+   这里不套 2 行限制 —— 没有棋盘要保护，而且这句是生成出来的，长度不固定。 */
+.end-bubble{
+  position:absolute;right:14px;bottom:16px;z-index:3;max-width:212px;
+  background:#fff;border-radius:16px;padding:10px 13px;
+  font-size:13.5px;line-height:1.55;color:var(--ink);
+  box-shadow:0 4px 16px rgba(140,90,90,.18);
+  animation:bubbleIn .28s cubic-bezier(.2,.9,.3,1.2) both;
+}
+.end-bubble .heart{color:var(--pink)}
+.end-result{
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  padding:20px 0 6px;
+  font-size:22px;font-weight:800;color:var(--ink);letter-spacing:.5px;
+}
+.end-result .cup{font-size:30px}
+.end-actions{display:flex;gap:12px;margin-top:auto;padding-top:22px}
+.end-actions .btn{flex:1}
+
+/* ============================ 台词槽位表 ============================ */
+.lines-card{background:#fff;border-radius:16px;padding:4px 0;box-shadow:0 3px 12px rgba(140,90,90,.09)}
+.lines-card h3{margin:14px 16px 8px;font-size:13px;color:var(--ink-2);font-weight:600}
+.lines-card .ln{display:flex;gap:9px;align-items:flex-start;padding:8px 16px;font-size:13px}
+.lines-card .ln .k{
+  flex:0 0 auto;font-size:11px;font-weight:700;color:var(--pink-dark);
+  background:var(--pink-soft);border-radius:8px;padding:3px 8px;margin-top:1px;
+}
+.lines-card .ln .src{display:block;font-size:10.5px;color:var(--ink-3);margin-top:3px}
+
+/* ============================ 实现说明 ============================ */
+.notes{padding:0 2px;font-size:12.5px;line-height:1.7;color:#5A4843}
+.notes h3{
+  font-size:13px;font-weight:700;color:var(--pink-dark);
+  margin:20px 0 9px;letter-spacing:.3px;
+}
+.notes h3:first-child{margin-top:2px}
+.notes ol{margin:0;padding-left:19px}
+.notes ol li{margin-bottom:7px}
+.notes .item{
+  background:#fff;border-radius:14px;padding:11px 13px;margin-bottom:9px;
+  box-shadow:0 2px 8px rgba(140,90,90,.07);
+}
+.notes .item .q{font-size:12.5px;font-weight:700;color:var(--ink);margin-bottom:5px}
+.notes .item .why{color:#8A6F68;font-size:11.5px;margin-bottom:6px}
+.notes .item .fix{color:#2F6B4F;font-size:11.5px}
+.notes .item .fix b{color:#1F5A3E;font-weight:700}
+.notes code{
+  background:#F6EFEC;border-radius:4px;padding:1px 4px;
+  font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#8A5A6A;
+}
+.notes .tag{
+  display:inline-block;font-size:10.5px;font-weight:700;border-radius:7px;
+  padding:2px 7px;margin-right:6px;background:var(--pink-soft);color:var(--pink-dark);
+}
+
+/* ============================ 更多菜单 ============================ */
+.sheet-mask{position:absolute;inset:0;background:rgba(40,25,25,.28);display:none;align-items:flex-end;z-index:50}
+.sheet-mask.on{display:flex}
+.sheet{width:100%;background:#fff;border-radius:22px 22px 36px 36px;padding:10px 0 22px;animation:sheetUp .22s ease-out both}
+@keyframes sheetUp{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+.sheet .grab{width:38px;height:4px;border-radius:2px;background:#E3DAD6;margin:4px auto 12px}
+.sheet button{
+  display:block;width:100%;border:0;background:transparent;font-family:inherit;
+  font-size:15.5px;color:var(--ink);padding:15px 24px;text-align:left;cursor:pointer;
+}
+.sheet button:active{background:#F7F2F0}
+.sheet button.danger{color:#D4436A}
+.sheet button:disabled{color:var(--ink-3)}
+.sheet .hint{font-size:11.5px;color:var(--ink-3);padding:2px 24px 0;line-height:1.6}
+
+/* ============================ 开发工具条 ============================ */
+.devbar{
+  width:360px;flex:0 0 auto;background:#fff;border-radius:18px;
+  padding:18px;box-shadow:0 14px 34px rgba(120,80,80,.14);font-size:13px;
+}
+.devbar h2{margin:0 0 4px;font-size:15px;font-weight:800}
+.devbar .sub{color:var(--ink-2);font-size:12px;line-height:1.6;margin-bottom:14px}
+.devbar .grp{margin-bottom:16px}
+.devbar .grp > .lbl{
+  font-size:11px;font-weight:800;color:var(--ink-3);letter-spacing:1.2px;
+  text-transform:uppercase;margin-bottom:8px;
+}
+.states{display:grid;gap:7px}
+.states button{
+  display:flex;align-items:center;gap:9px;border:1px solid #EFE6E2;background:#FDFBFA;
+  border-radius:11px;padding:9px 12px;font-family:inherit;font-size:13px;
+  color:var(--ink);cursor:pointer;text-align:left;
+}
+.states button .n{
+  width:19px;height:19px;flex:0 0 19px;border-radius:6px;background:var(--chip);
+  color:#8A6F68;font-size:11px;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+}
+.states button.on{border-color:var(--pink);background:#FFF4F7;color:var(--pink-dark);font-weight:700}
+.states button.on .n{background:var(--pink);color:#fff}
+.toggles{display:grid;gap:8px}
+.toggles label{display:flex;align-items:center;gap:8px;color:#5F4E4A;cursor:pointer}
+.toggles input{accent-color:var(--pink);width:15px;height:15px}
+.note{font-size:11.5px;line-height:1.7;color:var(--ink-2);background:#FBF7F5;border-radius:11px;padding:10px 12px}
+.note code{background:#F1E9E6;border-radius:4px;padding:1px 4px;font-family:ui-monospace,Consolas,monospace;font-size:11px;color:#8A5A6A}
+#model-json{
+  width:100%;height:270px;resize:vertical;border:1px solid #EFE6E2;border-radius:11px;
+  padding:10px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;
+  font-size:11px;line-height:1.6;color:#4A3A36;background:#FDFBFA;
+}
+#model-json:focus{outline:none;border-color:var(--pink)}
+.row-btns{display:flex;gap:8px;margin-top:8px}
+.row-btns button{
+  flex:1;border:1px solid #EFE6E2;background:#FDFBFA;border-radius:10px;
+  padding:9px;font-family:inherit;font-size:12.5px;font-weight:600;
+  color:#6E5A55;cursor:pointer;
+}
+.row-btns button.apply{background:var(--pink);border-color:var(--pink);color:#fff}
+.err{color:#D4436A;font-size:11.5px;margin-top:6px;min-height:14px;font-family:ui-monospace,Consolas,monospace}
+
+@media (max-width:1180px){ body{flex-direction:column;align-items:center} .devbar{width:390px} }
+</style>
+</head>
+<body>
+
+<!-- ==================== 手机 ==================== -->
+<div class="phone">
+  <div class="notch"></div>
+  <div class="screen" id="screen">
+    <div class="statusbar"><span>9:41</span><span class="sb-right">▮▮▮ ⌁ ▰</span></div>
+
+    <header class="appbar">
+      <button class="icon-btn" id="btn-back" aria-label="返回">‹</button>
+      <h1 id="app-title"></h1>
+      <button class="icon-btn" id="btn-more" aria-label="更多"><span class="gear">⚙</span></button>
+    </header>
+
+    <div class="feed" id="feed"></div>
+    <div class="content" id="content"></div>
+    <div class="dock" id="dock"></div>
+
+    <div class="sheet-mask" id="sheet-mask">
+      <div class="sheet">
+        <div class="grab"></div>
+        <button id="menu-resign"></button>
+        <button id="menu-newgame"></button>
+        <button disabled>复盘讲解（暂未开放）</button>
+        <div class="hint">悔棋 / 棋谱当前 Runtime 无对应能力，只展示禁用态。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== 开发工具条 ==================== -->
+<aside class="devbar">
+  <h2>五子棋 · UI 原型 v2（数据驱动）</h2>
+  <div class="sub">
+    页面里没有任何写死的名字 / 头像 / 台词，全部从下面的 MODEL 读。
+    改 JSON 点「应用」，界面立刻变。<br>
+    点棋盘空交点 → 预览落子 → 「确认落子」走完一个回合；<br>
+    <b>点苏苏的气泡 → 操作区原位变成输入框，可以跟她说话。</b>
+  </div>
+
+  <div class="grp">
+    <div class="lbl">状态与说明</div>
+    <div class="states" id="state-btns">
+      <button data-state="launch"><span class="n">1</span>进入页面 / 开始对局</button>
+      <button data-state="human"><span class="n">2</span>用户回合（可操作）</button>
+      <button data-state="thinking"><span class="n">3</span>苏苏回合 / 思考中</button>
+      <button data-state="character"><span class="n">4</span>苏苏落子与交流</button>
+      <button data-state="end"><span class="n">5</span>对局结束</button>
+      <button data-state="lines"><span class="n">6</span>台词槽位</button>
+      <button data-state="notes"><span class="n">7</span>实现说明 / 踩坑清单</button>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div class="lbl">显示</div>
+    <div class="toggles">
+      <label><input type="checkbox" id="tg-coord" checked> 显示坐标轴（列 A–O / 行 1–15）</label>
+    </div>
+  </div>
+
+  <div class="grp">
+    <div class="lbl">数据源 MODEL（可编辑）</div>
+    <textarea id="model-json" spellcheck="false"></textarea>
+    <div class="row-btns">
+      <button class="apply" id="btn-apply">应用</button>
+      <button id="btn-reset">恢复默认</button>
+    </div>
+    <div class="err" id="model-err"></div>
+  </div>
+
+  <div class="grp" style="margin-bottom:0">
+    <div class="lbl">字段来源</div>
+    <div class="note">
+      <code>session.viewer</code> ← 登录用户（昵称/头像）<br>
+      <code>session.character</code> ← 当前角色（昵称/头像）<br>
+      <code>utterance.text</code> ← 角色这一轮说的话（服务端生成）<br>
+      <code>dialogue.*</code> ← 兜底文案（服务端未下发时用）<br>
+      <code>game.*</code> ← <code>read_experience_state</code> 快照<br>
+      <code>ui.*</code> ← 纯 UI 文案，可硬编码
+    </div>
+  </div>
+</aside>
+
+<script>
+/* ==========================================================================
+   工具（必须在 MODEL 之前声明：MODEL 的初始化会用到 clone）
+   ========================================================================== */
+const $ = (s, r = document) => r.querySelector(s);
+const clone = o => JSON.parse(JSON.stringify(o));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s == null ? '' : s);
+/** 把 {character} / {viewer} 占位符换成真实数据 */
+function tpl(s, extra = {}) {
+  const map = {
+    character: MODEL.session.character.name,
+    viewer: MODEL.session.viewer.name,
+    ...extra,
+  };
+  return String(s).replace(/\{(\w+)\}/g, (_, k) => (k in map ? map[k] : '{' + k + '}'));
+}
+const U = () => MODEL.ui;
+const G = () => MODEL.game;
+
+/* ==========================================================================
+   MODEL —— 唯一数据源。页面上所有可变内容都从这里读。
+   ========================================================================== */
+/* 内联占位素材（真实头像由接口下发，此处只是让原型能独立打开） */
+const ASSET_CHARACTER = 'data:image/png;base64,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';
+
+const DEFAULT_MODEL = {
+  // 会话身份：来自登录态 + 角色资料
+  session: {
+    viewer:    { id: 'user-self', name: '申工', avatar: '' },
+    // 原型演示用的内联占位图；真实头像由接口下发，直接替换 avatar 字段即可
+    character: { id: 'sushixia', name: '苏苏', avatar: ASSET_CHARACTER }, 
+  },
+  // 角色 Presence 区尺寸：由 Experience 自己声明，不做一刀切模板。
+  // small = 小头像 + 气泡（小游戏） / medium = 中等立绘（五子棋） / large = 大立绘（大富翁等）
+  presence: { size: 'medium' },
+
+  // 对局快照：来自 read_experience_state
+  game: {
+    instanceId: 'gomoku_demo',
+    stateVersion: 0,
+    status: 'in_progress',        // in_progress | black_won | white_won | draw
+    currentPlayer: 'BLACK',       // BLACK = viewer，WHITE = character
+    board: [],                    // 15x15，'' | 'black' | 'white'
+    moves: [],                    // { color, row, col, coordinate }
+  },
+  // 角色发言：来自消息流 / 角色运行时
+  dialogue: {
+    opening:  '来和我下五子棋吧~<br>这次我可不是让你轻易赢哦！<span class="heart">♡</span>',
+    thinking: '让我想想…… 这个位置有点意思呢。( ˘ω˘ )',
+    move:     '我走这里啦~ 你没想赢我会下这儿吧？(๑•̀ㅂ•́)و',
+    critic:   '这个局面有点危险呢…',
+    ponder:   '我再想想，这一步很重要…',
+    resign:   '我认输了，你下得太好了~',
+    lose:     '这局我输了呢… 不过和你下棋真的很开心~ 再来一局吧？<span class="heart">♡</span>',
+    // 用户在局内说话之后，角色对这句话的回应
+    reply:    '嗯嗯，我听着呢~ 不过你这步棋可要想清楚哦。<span class="heart">♡</span>',
+    // 终局：按结果分三种，不再是固定一句
+    win:      '这局我赢啦~ 不过你也越来越难对付了呢。<span class="heart">♡</span>',
+    draw:     '居然下成和棋了，我们是不是太了解对方了呀。',
+  },
+  // 角色「这一轮说的话」。生产环境由服务端生成后下发，客户端只负责渲染；
+  // 服务端没给（离线 / 失败）时才回退到 dialogue 里同 trigger 的兜底文案。
+  utterance: { trigger: 'opening', text: '' },
+  // 纯 UI 文案
+  ui: {
+    titleTemplate: '和{character}下五子棋',
+    pieceBlack: '黑棋', pieceWhite: '白棋',
+    startCta: '开始对局', confirm: '确认落子', submitting: '提交中…',
+    cancel: '取消选择', undo: '悔棋', record: '棋谱', unavailable: '暂不可用',
+    statusYourTurn: '轮到你落黑棋', statusWaitingCharacter: '等待{character}行动',
+    statusBlackWon: '黑方获胜', statusWhiteWon: '白方获胜', statusDraw: '和棋',
+    thinking: '{character}正在思考…', thinkingEta: '（大约 2~5 秒）',
+    pleaseWait: '请稍等，{character}正在思考…',
+    resign: '认输', newGame: '开始新局', playAgain: '再来一局', backToChat: '返回聊天',
+    viewerWon: '{viewer} 获胜！', characterWon: '{character} 获胜',
+    viewerWonIcon: '🏆', characterWonIcon: '🌸', drawIcon: '🤝',
+    speakPlaceholder: '说点什么…', send: '发送',
+  },
+  // 视图状态（不属于业务数据）
+  view: { phase: 'launch', pending: null, submitting: false, showCoords: true,
+          speaking: false, draft: '' },
+  // 消息区内容。最新的在最后，旧的从上方溢出裁掉。
+  feed: [],
+};
+
+let MODEL = clone(DEFAULT_MODEL);
+
+/* ==========================================================================
+   数据接入层 —— 接真实 API 只改这里
+     readState ←→ read_experience_state
+     dispatch  ←→ dispatch_experience_action
+   ========================================================================== */
+const GomokuAdapter = {
+  async readState(instanceId) {
+    await sleep(120);
+    return Mock.readState(instanceId);            // TODO: 换成真实 API
+  },
+  async dispatch(action) {
+    await sleep(320);
+    return Mock.dispatch(action);                 // TODO: 换成真实 API
+  },
+  /**
+   * 局内说一句话，拿回角色的回应。
+   * @param {{instanceId:string, text:string}} p
+   * @returns {Promise<string>} 角色这一轮的回应文案（可含 HTML）
+   */
+  async say(p) {
+    await sleep(900);
+    return Mock.say(p);                           // TODO: 换成真实 API
+  },
+};
+
+/* ==========================================================================
+   Mock（仅原型自走用）
+   ========================================================================== */
+/* 模拟「服务端生成」的终局台词。刻意和 dialogue 里的兜底文案不同，
+   方便一眼看出当前走的是哪条路径。 */
+const GENERATED_END = {
+  lose: '哎呀，被你抓住了…这局算你的！不过下次我可不会手下留情哦 <span class="heart">♡</span>',
+  win:  '这局我赢啦~ 不过你真的越来越难对付了呢。',
+  draw: '居然下成和棋了，我们是不是太了解对方了呀。',
+};
+
+const Mock = (() => {
+  let g = null;
+  const empty = () => Array.from({length:15}, () => Array(15).fill(''));
+
+  function fresh() {
+    return { instanceId: MODEL.game.instanceId, stateVersion: 0, status: 'in_progress',
+             currentPlayer: 'BLACK', board: empty(), moves: [] };
+  }
+  const coordOf = (r, c) => 'ABCDEFGHIJKLMNO'[c] + (r + 1);
+
+  function wins(b, r, c, color) {
+    return [[0,1],[1,0],[1,1],[1,-1]].some(([dr,dc]) => {
+      let n = 1;
+      for (const s of [1,-1]) {
+        let y = r + dr*s, x = c + dc*s;
+        while (y>=0&&y<15&&x>=0&&x<15&&b[y][x]===color){ n++; y+=dr*s; x+=dc*s; }
+      }
+      return n >= 5;
+    });
+  }
+  function pick(b) {
+    const taken = [];
+    for (let r=0;r<15;r++) for (let c=0;c<15;c++) if (b[r][c]) taken.push([r,c]);
+    const cand = [];
+    for (const [r,c] of taken)
+      for (let dr=-2;dr<=2;dr++) for (let dc=-2;dc<=2;dc++){
+        const y=r+dr,x=c+dc;
+        if (y>=0&&y<15&&x>=0&&x<15&&!b[y][x]) cand.push([y,x]);
+      }
+    const pool = cand.length ? cand : [[7,7]];
+    return pool[Math.floor(Math.random()*pool.length)];
+  }
+
+  return {
+    readState() { if (!g) g = fresh(); return clone(g); },
+    dispatch(a) {
+      if (!g) g = fresh();
+      if (a.expectedStateVersion !== g.stateVersion)
+        throw new Error('state_version 冲突：期望 ' + a.expectedStateVersion + '，实际 ' + g.stateVersion);
+
+      if (a.actionType === 'resign') {
+        g.status = 'white_won'; g.stateVersion++;
+        setUtterance('resign');
+        return clone(g);
+      }
+      const coord = a.payload && a.payload.coordinate;
+      const c = 'ABCDEFGHIJKLMNO'.indexOf(coord[0]);
+      const r = parseInt(coord.slice(1), 10) - 1;
+      if (r < 0 || r > 14 || c < 0) throw new Error('非法坐标 ' + coord);
+      if (g.board[r][c]) throw new Error('该点已有棋子 ' + coord);
+
+      g.board[r][c] = 'black'; g.moves.push({color:'black', row:r, col:c, coordinate:coord}); g.stateVersion++;
+      if (wins(g.board, r, c, 'black')) {
+        g.status = 'black_won'; g.currentPlayer = null;
+        setUtterance('lose', GENERATED_END.lose);
+        return clone(g);
+      }
+      const [wr, wc] = pick(g.board);
+      g.board[wr][wc] = 'white'; g.moves.push({color:'white', row:wr, col:wc, coordinate:coordOf(wr,wc)}); g.stateVersion++;
+      if (wins(g.board, wr, wc, 'white')) {
+        g.status = 'white_won'; g.currentPlayer = null;
+        setUtterance('win', GENERATED_END.win);
+        return clone(g);
+      }
+      g.currentPlayer = 'BLACK';
+      setUtterance(Math.random() < .35 ? 'ponder' : 'move');
+      return clone(g);
+    },
+    reset() { g = fresh(); return clone(g); },
+
+    // 局内说话的回应。真实实现应由角色侧生成，这里只回固定台词。
+    say() { return MODEL.dialogue.reply; },
+  };
+})();
+
+/* ==========================================================================
+   棋盘
+   ========================================================================== */
+const STARS = [[3,3],[3,7],[3,11],[7,3],[7,7],[7,11],[11,3],[11,7],[11,11]];
+/* 交点 i 的圆心：i * cell + 半格（与网格线位置一致） */
+const AT = i => `calc(var(--cell) * ${i} + var(--cell) / 2)`;
+const CENTER = AT;
+
+function boardHTML(locked) {
+  const g = G();
+  let h = '<div class="board' + (locked ? ' locked' : '') + '">';
+  for (let i = 0; i < 15; i++) {
+    const p = AT(i);
+    h += `<div class="gl h" style="top:${p}"></div><div class="gl v" style="left:${p}"></div>`;
+  }
+  for (const [r, c] of STARS)
+    h += `<div class="star" style="left:${CENTER(c)};top:${CENTER(r)}"></div>`;
+
+  const last = g.moves[g.moves.length - 1];
+  if (!locked) {
+    for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) {
+      if (g.board[r] && g.board[r][c]) continue;
+      h += `<div class="spot" data-row="${r}" data-col="${c}" data-coordinate="${'ABCDEFGHIJKLMNO'[c]}${r+1}" `
+         + `style="left:${CENTER(c)};top:${CENTER(r)}"></div>`;
+    }
+  }
+  for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) {
+    const v = g.board[r] && g.board[r][c];
+    if (!v) continue;
+    const isLast = last && last.row === r && last.col === c;
+    h += `<div class="stone ${v}${isLast ? ' last' : ''}" style="left:${CENTER(c)};top:${CENTER(r)}"></div>`;
+  }
+  const p = MODEL.view.pending;
+  if (p && !locked)
+    h += `<div class="stone preview" style="left:${CENTER(p.col)};top:${CENTER(p.row)}"></div>`;
+  return h + '</div>';
+}
+
+const coordTop = () => `<div class="coord-row"><span class="lead"></span><span class="cells">${
+  [...'ABCDEFGHIJKLMNO'].map(x => `<span>${x}</span>`).join('')}</span><span class="tail"></span></div>`;
+const coordLeft = () => `<div class="coord-col">${
+  Array.from({length:15},(_,i)=>`<span>${i+1}</span>`).join('')}</div>`;
+
+function boardShell(locked) {
+  const c = MODEL.view.showCoords;
+  return `<div class="board-shell">
+    ${c ? coordTop() : ''}
+    <div class="board-mid">${c ? coordLeft() : ''}${boardHTML(locked)}${c ? coordLeft() : ''}</div>
+    ${c ? coordTop() : ''}
+  </div>`;
+}
+
+/* ==========================================================================
+   通用片段（身份、头像、名字全部从 MODEL 读）
+   ========================================================================== */
+function avatarHTML(who, cls) {
+  const p = who === 'viewer' ? MODEL.session.viewer : MODEL.session.character;
+  const initial = (p.name || '?').trim().charAt(0);
+  const img = p.avatar ? `<img src="${esc(p.avatar)}" alt="" onerror="this.remove()">` : '';
+  return `<div class="avatar ${cls}">${initial}${img}</div>`;
+}
+function bubbleRow(text, who = 'character') {
+  const me = who === 'viewer';
+  return `<div class="bubble-row ${me ? 'me' : ''}">
+    ${me ? avatarHTML('viewer', 'viewer') : avatarHTML('character', '')}
+    <div class="bubble"><span class="bubble-text">${text || ''}</span></div>
+  </div>`;
+}
+function vsStrip() {
+  const v = MODEL.session.viewer, c = MODEL.session.character;
+  return `<div class="vs-strip">
+    <div class="side">
+      <span class="stone-dot black"></span>
+      <span class="who"><span class="ell">${esc(v.name)}</span><small>${esc(U().pieceBlack)}</small></span>
+    </div>
+    <span class="vs-word">VS</span>
+    <div class="side right">
+      <span class="mini-avatar">${esc((c.name||'?').charAt(0))}${
+        c.avatar ? `<img src="${esc(c.avatar)}" alt="" onerror="this.remove()">` : ''}</span>
+      <span class="who" style="text-align:right"><span class="ell">${esc(c.name)}</span><small>${esc(U().pieceWhite)}</small></span>
+    </div>
+  </div>`;
+}
+function statusText() {
+  const g = G();
+  if (g.status === 'black_won') return U().statusBlackWon;
+  if (g.status === 'white_won') return U().statusWhiteWon;
+  if (g.status === 'draw')      return U().statusDraw;
+  return g.currentPlayer === 'WHITE' ? tpl(U().statusWaitingCharacter) : U().statusYourTurn;
+}
+/* 角色这一轮说的话：服务端给的优先，没有才回退到本地兜底表 */
+function currentLine() {
+  const u = MODEL.utterance || {};
+  return u.text || MODEL.dialogue[u.trigger] || MODEL.dialogue.opening;
+}
+function setUtterance(trigger, text) {
+  MODEL.utterance = { trigger, text: text || '' };
+  pushMessage('character', currentLine());
+}
+/* 消息区：最新的在最后，只留最近几条，旧的从上方溢出 */
+function pushMessage(who, text) {
+  MODEL.feed.push({ who, text });
+  if (MODEL.feed.length > 8) MODEL.feed.shift();
+}
+function feedHTML() {
+  const thinking = MODEL.view.phase === 'thinking';
+  return MODEL.feed.map((m, i) => {
+    const last = i === MODEL.feed.length - 1;
+    const text = (thinking && last && m.who === 'character')
+      ? m.text + '<span class="dots"><i></i><i></i><i></i></span>'
+      : m.text;
+    return bubbleRow(text, m.who);
+  }).join('');
+}
+
+/* ==========================================================================
+   各状态渲染
+   ========================================================================== */
+function renderLaunch() {
+  const c = MODEL.session.character, v = MODEL.session.viewer;
+  // 立绘高度由 Experience 声明，不写死在模板里
+  const HERO_H = { small: 190, medium: 352, large: 460 };
+  const heroH = HERO_H[(MODEL.presence || {}).size] || HERO_H.medium;
+  return `
+  <div class="hero" style="height:${heroH}px">
+    <div class="hero-fallback">${esc((c.name||'?').charAt(0))}</div>
+    ${c.avatar ? `<img class="hero-art" src="${esc(c.avatar)}" alt="" onerror="this.remove()">` : ''}
+  </div>
+  <div style="margin-top:-46px;position:relative;z-index:5">
+    ${bubbleRow(currentLine(), 'character')}
+  </div>
+
+  <div class="vs-block">
+    <div class="player">
+      <div class="big-avatar viewer">${esc((v.name||'?').charAt(0))}${
+        v.avatar ? `<img src="${esc(v.avatar)}" alt="" onerror="this.remove()">` : ''}</div>
+      <div class="nm">${esc(v.name)}</div>
+      <div class="tag">${esc(U().pieceBlack)} · 先手</div>
+    </div>
+    <div class="vs-big">VS</div>
+    <div class="player">
+      <div class="big-avatar">${esc((c.name||'?').charAt(0))}${
+        c.avatar ? `<img src="${esc(c.avatar)}" alt="" onerror="this.remove()">` : ''}</div>
+      <div class="nm">${esc(c.name)}</div>
+      <div class="tag">${esc(U().pieceWhite)}</div>
+    </div>
+  </div>
+
+  <ul class="features">
+    <li><span class="fi">▦</span>经典 15×15 棋盘</li>
+    <li><span class="fi">◍</span>与${esc(c.name)}实时对局</li>
+    <li><span class="fi">◷</span>支持中途保存，随时继续</li>
+    <li><span class="fi">♡</span>每一局都有不同的对话与陪伴</li>
+  </ul>
+
+  <button class="btn btn-primary" id="btn-start">${esc(U().startCta)}</button>`;
+}
+
+/* 用户回合。苏苏刚落子之后也是这个状态 —— 棋盘始终可点，
+   「轮到你落子」只是提示文案，不是需要先点一下才能下棋的按钮。
+   点气泡 → 操作区原位切换成输入框（棋盘不动）；点棋盘 → 立刻回到落子。 */
+function renderTurn() {
+  const p = MODEL.view.pending;
+  return `
+  ${vsStrip()}
+  ${boardShell(false)}
+  <div class="info-row">
+    <span class="chip">${p ? `已选择 <b>${esc(p.coordinate)}</b>` : esc(statusText())}</span>
+    <button class="text-btn" id="btn-cancel" style="visibility:${p ? 'visible' : 'hidden'}">${esc(U().cancel)}</button>
+  </div>`;
+}
+
+function actionBar(p) {
+  return `<div class="action-bar">
+    <button class="btn btn-ghost" disabled>${esc(U().record)}<span class="sub">${esc(U().unavailable)}</span></button>
+    <button class="btn btn-ghost" disabled>${esc(U().undo)}<span class="sub">${esc(U().unavailable)}</span></button>
+    <button class="btn btn-primary" id="btn-confirm" ${p ? '' : 'disabled'}>
+      ${esc(MODEL.view.submitting ? U().submitting : U().confirm)}</button>
+  </div>`;
+}
+
+function speakBar() {
+  const d = MODEL.view.draft || '';
+  return `<div class="speak-bar">
+    <input class="speak-input" id="speak-input" type="text" autocomplete="off"
+           placeholder="${esc(U().speakPlaceholder)}" value="${esc(d)}">
+    <button class="speak-send" id="btn-send" ${d.trim() ? '' : 'disabled'}>${esc(U().send)}</button>
+  </div>`;
+}
+const renderHuman = renderTurn;
+const renderCharacter = renderTurn;
+
+function renderThinking() {
+  return `
+  ${vsStrip()}
+  ${boardShell(true)}
+  <div class="info-row"><span class="chip">${esc(statusText())}</span></div>`;
+}
+function statusStrip() {
+  return `<div class="status-strip"><span class="spinner"></span>${esc(tpl(U().pleaseWait))}<span class="eta">${esc(U().thinkingEta)}</span></div>`;
+}
+
+function renderEnd() {
+  const c = MODEL.session.character;
+  const st = G().status;
+  const icon = st === 'black_won' ? U().viewerWonIcon
+             : st === 'white_won' ? U().characterWonIcon
+             : U().drawIcon;
+  const label = st === 'black_won' ? tpl(U().viewerWon)
+              : st === 'white_won' ? tpl(U().characterWon)
+              : U().statusDraw;
+  return `
+  <div class="end-screen">
+    <div class="end-hero">
+      <div class="end-art-fallback">${esc((c.name || '?').charAt(0))}</div>
+      ${c.avatar ? `<img class="end-art" src="${esc(c.avatar)}" alt="" onerror="this.remove()">` : ''}
+      <div class="end-bubble">${currentLine()}</div>
+    </div>
+    <div class="end-result">
+      <span class="cup">${esc(icon)}</span>${esc(label)}
+    </div>
+    <div class="end-actions">
+      <button class="btn btn-primary" id="btn-again">${esc(U().playAgain)}</button>
+      <button class="btn btn-ghost" id="btn-back-chat">${esc(U().backToChat)}</button>
+    </div>
+  </div>`;
+}
+
+function renderLines() {
+  const d = MODEL.dialogue;
+  const u = MODEL.utterance || {};
+  const slots = [
+    ['开局', 'opening',  '对局开始时'],
+    ['思考', 'thinking', '进入角色回合、开始长考'],
+    ['落子', 'move',     '角色落子后'],
+    ['关键局面', 'critic', '局面吃紧时主动评论'],
+    ['长考陪伴', 'ponder', '思考时间偏长时的安抚'],
+    ['认输', 'resign',   '角色认输'],
+    ['输了', 'lose',     '终局 · 角色输'],
+    ['赢了', 'win',      '终局 · 角色赢'],
+    ['和棋', 'draw',     '终局 · 平局'],
+    ['回应', 'reply',    '用户在局内说话之后'],
+  ];
+  return `
+  <div class="lines-card">
+    <h3>当前这一句（服务端生成）</h3>
+    <div class="ln">
+      <span class="k">${esc(u.trigger || '—')}</span>
+      <span>${u.text || '<i style="color:#B49C95">（服务端未下发，已回退到下面的兜底文案）</i>'}
+        <span class="src">utterance.text</span></span>
+    </div>
+  </div>
+
+  <div class="lines-card" style="margin-top:14px">
+    <h3>兜底文案表（服务端没给时才用）</h3>
+    ${slots.map(([k, key, when]) => `<div class="ln">
+      <span class="k">${k}</span>
+      <span>${d[key] || '<i style="color:#B49C95">（未提供）</i>'}
+        <span class="src">dialogue.${key} · ${when}</span></span>
+    </div>`).join('')}
+  </div>
+
+  <div class="note" style="margin-top:14px">
+    <b>台词是两步出来的，不是从状态直接拼的。</b><br>
+    <b>① Surface</b> 只提供当前可见：棋盘、最后落子、双方状态、手数 —— 这些是事实。<br>
+    <b>② Expression</b> 决定：我要不要说话 / 说什么 —— 这是角色的产出，也就是
+    <code>utterance.text</code>。<br>
+    客户端不做第 ② 步。服务端没给就<b>保持安静</b>，别用模板硬凑一句，
+    否则漂亮 UI 里面还是机器人。
+  </div>
+  <div class="note" style="margin-top:10px">
+    <b>终局同理，而且分三种结果。</b>「输 / 赢 / 和」在下面的兜底表里是三条，
+    但正常情况下它们都只是离线兜底 —— 真正说什么由 Expression 决定。
+  </div>`;
+}
+
+/* ==========================================================================
+   实现说明（移植到 Flutter 时的注意事项）
+   ========================================================================== */
+const NOTES = [
+  ['顶部立绘不能做成一刀切的大 Banner',
+   'Echo 里不只有五子棋，还有聊天、大富翁和其他 Experience。如果每个页面都摆一张巨大的角色 Banner + 内容，整体会很重，而且角色会抢走核心交互的位置。',
+   '保留「角色 Presence 区」这个概念，但<b>尺寸由 Experience 自己声明</b>，不写死在模板里。本稿走 <code>presence.size</code>：五子棋 <b>medium</b>（中等立绘）、大富翁 <b>large</b>、小游戏 <b>small</b>（小头像 + 气泡）。换尺寸只改数据，不动布局代码。'],
+  ['气泡内容不能由游戏状态直接生成',
+   '「苏苏落子 → 拼出一句『我下在 H8』→ 显示」——UI 再漂亮，里面还是机器人。棋子落在哪是事实，不是角色想说的话。',
+   '拆成两步：<b>Surface 只提供「当前可见什么」</b>（棋盘、最后落子、双方状态、手数），<b>Expression 决定「我要不要说话 / 说什么」</b>。客户端和 Surface 都不许替角色开口；服务端没给 utterance 时就<b>保持安静</b>，不要用模板硬凑一句。对应到代码：<code>utterance.text</code> 是角色的产出，<code>dialogue.*</code> 只是离线兜底。'],
+  ['消息区不是游戏日志，是会话流的实时投影',
+   '如果消息区由游戏自己维护（落子就 push 一条），那它和聊天页、其他 Experience 就是两套数据：在游戏里说的话回聊天页看不到，聊天页说的话游戏里也看不到。',
+   '把它当成<b>同一条会话流的另一个视图</b>：聊天页、五子棋、大富翁都订阅同一条有序流，消息区只渲染「最新 N 条」。注意三件事：<br>① <b>按 id 去重</b> —— 自己发出去的消息会从流里回灌，本地乐观插入 + 回执去重，否则会重复一条；<br>② <b>只有「话」进流</b> —— 落子是 Surface 的状态变更，不是角色说的话，别写进流，否则聊天页会被棋谱刷屏；<br>③ <b>要能往上翻</b> —— 消息区高度固定、不可滚，看更早的要么展开半屏抽屉，要么跳回聊天页。'],
+  ['操作区必须是固定底部 Dock，不能进内容流',
+   '把「确认落子」放在滚动内容里，棋盘一长就要滚动才能点到，核心交互被内容挤走。',
+   'SafeArea Bottom Dock：操作区是独立一层（Flutter 对应 <code>bottomNavigationBar</code> 或 <code>Column</code> 的固定子项），棋盘与信息在它上面的可滚动区。<b>本稿已按此实现</b>——<code>.dock</code> 在 <code>.content</code> 之外，不参与滚动，底部留 safe-area。<br><b>关键细节</b>：dock 里三种内容（落子操作 / 输入条 / 思考状态条）必须<b>等高</b>，否则内容区高度会变 ⇒ 消息区高度变 ⇒ 棋盘跟着动。本稿统一锁成 62px。'],
+  ['键盘弹起把棋盘顶上去',
+   'Flutter 默认 resizeToAvoidBottomInset: true，键盘一弹整个页面收缩，棋盘被压缩或跳位。',
+   'Scaffold 设 <b>resizeToAvoidBottomInset: false</b>；输入条自己用 <code>Padding(bottom: MediaQuery.viewInsets.bottom)</code> 抬起来，或直接放 bottomSheet。键盘态棋盘必须仍停在 272.6 那一行。'],
+  ['坐标轴缺行轴，读数和界面对不上',
+   '设计稿只画了列标 A–O，没有行轴，但界面读数写的是「H8」——H8 意味着行是数字。',
+   '列 A–O 标在棋盘上、下；行 1–15 标在左、右。H8 = 列 H、行 8（1-based）。四边都要，缺一边用户就没法建立空间参照。'],
+  ['棋子和网格线差半格',
+   '网格线按「14 格 + 两侧边距」画，棋子按「格子中心」放，两套公式差半个格子，所有棋子整体偏移。',
+   '统一成一套：<b>棋盘边长 = 15 × cell</b>，第 i 条线 / 第 i 个交点都取 <code>i × cell + cell / 2</code>。自检：首线 = 末线 − 14 × cell，交点 (0,0) = cell / 2。'],
+  ['台词长短不一，棋盘上下跳',
+   '角色台词 1 行和 2 行时气泡高度不同，棋盘跟着动。',
+   '把气泡升级成<b>消息区</b>：棋盘上方固定一块弹性区域，最新的消息贴底，旧的从上方溢出并淡出（<code>flex-direction:column; justify-content:flex-end; overflow:hidden</code> + 顶部 mask 渐变）。单条气泡仍限 2 行（<code>maxLines:2 + ellipsis</code>），但整个区域高度恒定 ⇒ 棋盘不动。<br><b>⚠️ 关键坑</b>：弹性区域的 <code>flex-basis</code> 必须是 <b>0</b>，不能写 <code>auto</code>。写 <code>auto</code> 时基准尺寸会取「内容高度」，消息越多基准越高，<b>会把下面的棋盘挤扁</b>。正确写法 <code>flex: 1 1 0%</code>（Flutter 里对应 <code>Expanded</code>，不要用 <code>Flexible(fit: loose)</code> 让它按内容撑）。'],
+  ['输入框打字丢焦点',
+   '每次 onChanged 触发整页重建 → TextField 重建 → 光标丢、输入断。',
+   '草稿只放局部：用 <code>TextEditingController</code> + 局部 setState / 独立 provider，<b>不要进全局 state</b>。发送按钮的可用态用 ValueListenableBuilder 单独监听 controller，别触发整页 rebuild。'],
+  ['AI 思考期间用户抢手',
+   'dispatch 还没回来用户又点棋盘，会出现两次落子或状态错乱。',
+   '提交期间棋盘置为不可点（本稿 <code>.board.locked</code>）+ 确认按钮 disabled。同时 dispatch 必须带 <code>expected_state_version</code>，后端做乐观并发校验，版本不匹配直接拒绝。'],
+  ['落子失败的半状态',
+   '选了点没确认就切走，或确认后 dispatch 失败 → 预览棋子残留、按钮状态错乱。',
+   'pending 只活在客户端视图状态，<b>不要写进 game state</b>；只有拿到 applied 结果后才清除 pending；失败要回滚 pending 并提示。<b>测这个必须定点注入失败</b>（第 N 次写某个 key 失败），无条件抛错会在第一步就挂，正好绕过 half-state。'],
+  ['用户自己说的话放哪',
+   '只放一个气泡的话，用户说一句 + 角色回一句就是两条，塞不下；而且用完就替换掉，用户看不到自己说过什么。',
+   '用<b>消息区</b>：棋盘上方那块区域按行堆叠，用户的话靠右（粉气泡），角色的话靠左，最新的贴底、旧的往上溢出并淡出。上面多出来的空间正好被用掉，不用再纠结「谁替换谁」。真正需要长历史时再开半屏抽屉，别把主屏堆满。'],
+  ['名字和头像被写死',
+   '设计稿上写着「申工 / 苏苏」，实现时很容易照抄成常量。',
+   '一律从 session 取（viewer / character 的 name + avatar），头像空时用名字首字做圆形占位。换角色必须零改动。'],
+  ['禁用按钮伪装成可用',
+   '悔棋 / 棋谱在 Runtime 里没有对应能力，做成了可点的样子。',
+   '只显示禁用态 + 「暂不可用」小字，不要绑动作。没有能力的入口宁可灰掉，也不要点了没反应。'],
+  ['棋盘交点太小，真机点不准',
+   '15×15 落在 300px 棋盘上，单格只有 20px，低于手指可靠点击尺寸。',
+   '交点热区放大到 ≥ 24px（允许相邻重叠），并保留「选中预览 → 确认落子」两步，让用户落子前能反悔。这一步本身就是对触点问题的兜底。'],
+  ['底部安全区被 home indicator 压住',
+   '操作区紧贴屏底时会被系统手势条盖住。',
+   '整页套 <code>SafeArea</code>，底部额外留出 inset；本稿操作区下方留了 26px。'],
+  ['小字对比度不达标',
+   '坐标字（木底上）、禁用按钮字、状态条字这类 9.5–12px 的小字最容易低于 4.5:1。',
+   '一律按小字 4.5:1 收口。本稿实测：坐标 4.96、禁用按钮字 4.82、状态条 4.82、棋子说明 4.91、暂不可用 4.69。取值见文件顶部 CSS 变量。'],
+  ['Web 端 -webkit-line-clamp 与 padding 同层会漏行',
+   '省略号正常加上，但多余的行照样渲染出来，overflow:hidden 拦不住。',
+   '把 clamp 放到内层元素：外层管 padding，内层管 <code>display:-webkit-box + line-clamp</code>。Flutter 不受影响，做 Web 端才要注意。'],
+  ['角色台词不能是固定模板',
+   '设计稿把终局写成一句写死的「这局我输了呢…」，但接上 AI 之后，同一局的结果、局面、之前的对话都会影响她说什么。而且结局有三种（角色输 / 角色赢 / 和棋），一句模板根本覆盖不了。',
+   '把「角色说的话」从模板表里拆出来，单独走 <code>utterance = { trigger, text }</code>：<b>text 由服务端生成后下发，客户端只渲染</b>。本地 <code>dialogue</code> 表降级为<b>离线兜底</b>，且终局按输 / 赢 / 和分三条。判断标准很简单：这句话是不是角色「想出来的」——是，就走 utterance；只是界面文案（按钮、状态词），才留在 ui。'],
+  ['本原型的已知瑕疵：内联头像让重渲染变重',
+   '为了让原型能单文件打开，头像用了 base64 内联。每渲染一次都会把这段字符串复制进 DOM 多次（进入页约 3 份 ≈ 90KB）。',
+   '只影响这个原型，不影响 Flutter。真接接口后 avatar 是短 URL，问题自然消失。若要在 Web 上继续用，改成渲染后统一 <code>img.src = AVATAR</code> 补一次即可。'],
+];
+
+function renderNotes() {
+  return `
+  <div class="notes">
+    <h3>精髓</h3>
+    <ol>
+      <li><b>棋盘位置是硬约束。</b>任何新增内容都不许改变棋盘 y 坐标。本稿靠「固定高度气泡槽 + 同槽切换的操作区」守住，三态 + 说话态实测位移 0.0px。</li>
+      <li><b>一切可变内容来自 MODEL。</b>身份、头像、名字、台词、对局快照都不写死在页面里。</li>
+      <li><b>落子是主任务，说话是副任务。</b>两者共用棋盘下方那一个槽位切换，不并排、不常驻。</li>
+      <li><b>一个动作 = 一次 dispatch。</b>客户端不判胜负、不判该谁走，规则权威在 Runtime / reducer。</li>
+      <li><b>角色可见性不由客户端决定。</b>能不能看到这个角色、能不能开局，权威在服务端。</li>
+    </ol>
+
+    <h3>可能遇到的困难</h3>
+    ${NOTES.map(([q, why, fix], i) => `
+      <div class="item">
+        <div class="q">${i + 1}. ${q}</div>
+        <div class="why">${why}</div>
+        <div class="fix">解决：${fix}</div>
+      </div>`).join('')}
+
+    <h3>接入点（三个方法）</h3>
+    <div class="item">
+      <div class="q">GomokuAdapter</div>
+      <div class="fix" style="color:#5A4843">
+        <code>readState(instanceId)</code> → read_experience_state<br>
+        <code>dispatch({instanceId, actionType, expectedStateVersion, payload})</code> → dispatch_experience_action<br>
+        <code>say({instanceId, text})</code> → 角色对局内这句话的回应
+      </div>
+      <div class="why" style="margin:6px 0 0">
+        actionType 目前只有 <code>place_piece</code> / <code>resign</code>；
+        payload 落子为 <code>{ coordinate: "H8" }</code>。
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ==========================================================================
+   主渲染
+   ========================================================================== */
+function render() {
+  $('#app-title').textContent = tpl(U().titleTemplate);
+  $('#menu-resign').textContent = U().resign;
+  $('#menu-newgame').textContent = U().newGame;
+
+  const map = { launch: renderLaunch, human: renderHuman, thinking: renderThinking,
+                character: renderCharacter, end: renderEnd, lines: renderLines,
+                notes: renderNotes };
+  const el = $('#content');
+  el.innerHTML = (map[MODEL.view.phase] || renderLaunch)();
+  el.scrollTop = 0;
+
+  const ph = MODEL.view.phase;
+  const turn = ph === 'human' || ph === 'character';
+  const thinking = ph === 'thinking';
+  const feedOn = turn || thinking;
+
+  // 消息区：在棋盘上方，固定不滚动，吃掉剩余空间
+  $('#feed').innerHTML = feedOn ? feedHTML() : '';
+  $('#screen').classList.toggle('feed-on', feedOn);
+
+  // 操作区是固定底部 Dock，不进滚动内容
+  const dock = $('#dock');
+  dock.innerHTML = turn
+    ? (MODEL.view.speaking ? speakBar() : actionBar(MODEL.view.pending))
+    : thinking ? statusStrip() : '';
+  dock.classList.toggle('on', turn || thinking);
+
+  bindStage();
+  document.querySelectorAll('#state-btns button').forEach(b =>
+    b.classList.toggle('on', b.dataset.state === MODEL.view.phase));
+}
+
+function bindStage() {
+  const turn = MODEL.view.phase === 'human' || MODEL.view.phase === 'character';
+
+  $('#content').querySelectorAll('.spot').forEach(s => s.addEventListener('click', () => {
+    if (MODEL.view.submitting) return;
+    // 点棋盘 = 放弃说话，直接进入落子
+    MODEL.view.speaking = false;
+    MODEL.view.draft = '';
+    MODEL.view.pending = { row:+s.dataset.row, col:+s.dataset.col, coordinate:s.dataset.coordinate };
+    render();
+  }));
+  const on = (id, fn) => { const n = $('#' + id); if (n) n.addEventListener('click', fn); };
+  on('btn-cancel',  () => { MODEL.view.pending = null; render(); });
+  on('btn-confirm', confirmMove);
+  on('btn-start',   () => { MODEL.view.phase = 'human'; MODEL.view.pending = null; render(); });
+  on('btn-again', async () => {
+    Mock.reset();
+    MODEL.game = await GomokuAdapter.readState(MODEL.game.instanceId);
+    setUtterance('opening');
+    MODEL.view = { ...MODEL.view, phase:'launch', pending:null, submitting:false,
+                   speaking:false, draft:'' };
+    render();
+  });
+  on('btn-back-chat', () => { MODEL.view.phase = 'launch'; render(); });
+
+  // 说话入口挂在气泡上：气泡本来就是对话面
+  if (turn && !MODEL.view.speaking) {
+    const b = $('#feed .bubble-row:last-child .bubble');
+    if (b) {
+      b.classList.add('tappable');
+      b.addEventListener('click', () => {
+        MODEL.view.speaking = !MODEL.view.speaking;
+        MODEL.view.draft = '';
+        MODEL.view.pending = null;
+        render();
+      });
+    }
+  }
+
+  // 输入框：不做整体重渲染，否则每敲一个字都会丢焦点
+  const input = $('#speak-input');
+  if (input) {
+    if (document.activeElement !== input) input.focus();
+    const sync = () => { const sb = $('#btn-send'); if (sb) sb.disabled = !input.value.trim(); };
+    input.addEventListener('input', sync);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); sendMessage(); }
+      if (e.key === 'Escape') { MODEL.view.speaking = false; render(); }
+    });
+    sync();
+  }
+  on('btn-send', sendMessage);
+}
+
+/* 局内说一句话：先把自己的话亮出来，再换成角色的回应。 */
+async function sendMessage() {
+  const input = $('#speak-input');
+  const text = (input ? input.value : MODEL.view.draft || '').trim();
+  if (!text) return;
+  MODEL.view.speaking = false;
+  MODEL.view.draft = '';
+  MODEL.view.pending = null;
+  pushMessage('viewer', esc(text));
+  render();
+  try {
+    const reply = await GomokuAdapter.say({ instanceId: G().instanceId, text });
+    setUtterance('reply', reply);
+  } catch (e) {
+    alert('发送失败：' + e.message);
+  }
+  render();
+}
+
+/* 一次完整回合：pending → 确认 → 提交 → 角色思考 → 角色落子 */
+async function confirmMove() {
+  if (!MODEL.view.pending || MODEL.view.submitting) return;
+  const action = {
+    instanceId: G().instanceId,
+    actionType: 'place_piece',
+    expectedStateVersion: G().stateVersion,
+    payload: { coordinate: MODEL.view.pending.coordinate },
+  };
+  MODEL.view.submitting = true;
+  render();
+  try {
+    MODEL.game = await GomokuAdapter.dispatch(action);
+    MODEL.view.pending = null;
+    MODEL.view.submitting = false;
+    if (MODEL.game.status !== 'in_progress') { MODEL.view.phase = 'end'; render(); return; }
+    MODEL.view.phase = 'thinking'; render();
+    await sleep(1600);
+    MODEL.view.phase = 'character'; render();
+  } catch (e) {
+    MODEL.view.submitting = false;
+    MODEL.view.pending = null;
+    alert('落子失败：' + e.message);
+    render();
+  }
+}
+
+/* ==========================================================================
+   工具条
+   ========================================================================== */
+function midGame() {
+  const g = { instanceId: MODEL.game.instanceId, stateVersion: 8, status:'in_progress',
+              currentPlayer:'BLACK', board: Array.from({length:15},()=>Array(15).fill('')), moves: [] };
+  const seq = [[7,7,'black'],[7,8,'white'],[6,8,'black'],[8,8,'white'],[8,9,'black'],[9,10,'black'],[9,11,'white'],[10,10,'black']];
+  for (const [r,c,col] of seq) {
+    g.board[r][c] = col;
+    g.moves.push({ color:col, row:r, col:c, coordinate:'ABCDEFGHIJKLMNO'[c] + (r+1) });
+  }
+  MODEL.game = g;
+}
+
+document.querySelectorAll('#state-btns button').forEach(b => b.addEventListener('click', () => {
+  const ph = b.dataset.state;
+  MODEL.view.pending = null;
+  MODEL.view.submitting = false;
+  MODEL.view.speaking = false;
+  MODEL.view.draft = '';
+  MODEL.feed = [];
+  if (ph === 'launch') {
+    if (G().status !== 'in_progress' || G().moves.length) Mock.reset();
+    MODEL.game = Mock.readState(MODEL.game.instanceId);
+    setUtterance('opening');
+  }
+  if (ph === 'human') {
+    if (G().status !== 'in_progress' || G().moves.length < 2) Mock.reset();
+    MODEL.game = Mock.readState(MODEL.game.instanceId);
+    setUtterance('opening');
+  }
+  if (ph === 'thinking' || ph === 'character') {
+    midGame();
+    setUtterance(ph === 'thinking' ? 'thinking' : 'move');
+  }
+  if (ph === 'end') { midGame(); MODEL.game.status = 'black_won'; setUtterance('lose', GENERATED_END.lose); }
+  MODEL.view.phase = ph;
+  render();
+}));
+
+$('#btn-back').addEventListener('click', () => { MODEL.view.phase = 'launch'; MODEL.view.pending = null; render(); });
+$('#btn-more').addEventListener('click', () => $('#sheet-mask').classList.add('on'));
+$('#sheet-mask').addEventListener('click', e => { if (e.target.id === 'sheet-mask') $('#sheet-mask').classList.remove('on'); });
+$('#menu-resign').addEventListener('click', async () => {
+  $('#sheet-mask').classList.remove('on');
+  try {
+    MODEL.game = await GomokuAdapter.dispatch({
+      instanceId: G().instanceId, actionType:'resign',
+      expectedStateVersion: G().stateVersion, payload: {},
+    });
+    MODEL.view.phase = 'end'; render();
+  } catch (e) { alert(e.message); }
+});
+$('#menu-newgame').addEventListener('click', async () => {
+  $('#sheet-mask').classList.remove('on');
+  Mock.reset();
+  MODEL.game = await GomokuAdapter.readState(MODEL.game.instanceId);
+  setUtterance('opening');
+  MODEL.view = { ...MODEL.view, phase:'launch', pending:null, submitting:false,
+                 speaking:false, draft:'' };
+  MODEL.feed = [];
+  render();
+});
+
+$('#tg-coord').addEventListener('change', e => { MODEL.view.showCoords = e.target.checked; render(); });
+
+/* ---- MODEL 编辑器 ---- */
+const ta = $('#model-json'), errBox = $('#model-err');
+function pushModel() {
+  ta.value = JSON.stringify({
+    session: MODEL.session,
+    game: { instanceId: MODEL.game.instanceId, stateVersion: MODEL.game.stateVersion,
+            status: MODEL.game.status, currentPlayer: MODEL.game.currentPlayer,
+            board: [], moves: [] },
+    dialogue: MODEL.dialogue,
+    presence: MODEL.presence,
+    utterance: MODEL.utterance,
+    ui: MODEL.ui,
+  }, null, 2);
+}
+$('#btn-apply').addEventListener('click', () => {
+  try {
+    const next = JSON.parse(ta.value);
+    errBox.textContent = '';
+    if (next.session)  MODEL.session = next.session;
+    if (next.dialogue) MODEL.dialogue = { ...MODEL.dialogue, ...next.dialogue };
+    if (next.utterance) MODEL.utterance = { ...MODEL.utterance, ...next.utterance };
+    if (next.ui)       MODEL.ui = { ...MODEL.ui, ...next.ui };
+    if (next.presence) MODEL.presence = { ...MODEL.presence, ...next.presence };
+    if (next.game)     MODEL.game = { ...MODEL.game, ...next.game,
+                                      board: MODEL.game.board, moves: MODEL.game.moves };
+    render();
+  } catch (e) {
+    errBox.textContent = 'JSON 解析失败：' + e.message;
+  }
+});
+$('#btn-reset').addEventListener('click', () => {
+  MODEL = clone(DEFAULT_MODEL);
+  Mock.reset();
+  MODEL.game = Mock.readState(MODEL.game.instanceId);
+  setUtterance('opening');
+  pushModel(); errBox.textContent = ''; render();
+});
+
+/* ==========================================================================
+   启动
+   ========================================================================== */
+(async function boot() {
+  MODEL.game = await GomokuAdapter.readState(MODEL.game.instanceId);
+  setUtterance('opening');
+  pushModel();
+  render();
+})();
+</script>
+</body>
+</html>
